@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -20,10 +23,17 @@ type Ttype struct {
 	cT         string // время создания
 	fT         string // время выполнения
 	taskRESULT []byte
-	result     bool
+	success    bool
 }
 
 func main() {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan,
+		syscall.SIGHUP,
+		syscall.SIGINT,
+		syscall.SIGTERM,
+		syscall.SIGQUIT)
+
 	superChan := make(chan Ttype, 10)
 	defer close(superChan)
 
@@ -42,13 +52,18 @@ func main() {
 		}
 	}()
 
+loop:
 	for {
 		select {
 		case r := <-doneTasks:
 			fmt.Printf("Done: %d \n", r.id)
 		case r := <-undoneTasks:
 			fmt.Printf("Undone: %s \n", r)
+		case <-sigChan:
+			fmt.Println("Bye-byes")
+			break loop
 		}
+
 	}
 }
 
@@ -68,10 +83,10 @@ func taskWorker(a Ttype) Ttype {
 	tt, _ := time.Parse(time.RFC3339, a.cT)
 	if tt.After(time.Now().Add(-20 * time.Second)) {
 		a.taskRESULT = []byte("task has been successed")
-		a.result = true
+		a.success = true
 	} else {
 		a.taskRESULT = []byte("something went wrong")
-		a.result = false
+		a.success = false
 	}
 	a.fT = time.Now().Format(time.RFC3339Nano)
 
@@ -81,7 +96,7 @@ func taskWorker(a Ttype) Ttype {
 }
 
 func taskSorter(t Ttype, doneTasks chan Ttype, undoneTasks chan error) {
-	if t.result {
+	if t.success {
 		doneTasks <- t
 	} else {
 		undoneTasks <- fmt.Errorf("task id %d time %s, error %s", t.id, t.cT, t.taskRESULT)
